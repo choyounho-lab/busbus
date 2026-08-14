@@ -17,8 +17,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class BusCsvFillRunner implements ApplicationRunner {
 
-	private static final Path INPUT = Path.of("bus_routes.csv");
-	private static final Path OUTPUT = Path.of(System.getProperty("user.home"), "Desktop", "bus_routes_multi_source.csv");
+	private static final Path DEFAULT_INPUT = Path.of("bus_routes.csv");
+	private static final Path DEFAULT_OUTPUT = Path.of(System.getProperty("user.home"), "Desktop", "bus_routes_multi_source.csv");
 
 	private final SeleniumBusInfoService busInfoService;
 	private final NaverBusInfoService naverBusInfoService;
@@ -43,16 +43,19 @@ public class BusCsvFillRunner implements ApplicationRunner {
 			return;
 		}
 
-		List<String> rows = Files.readAllLines(INPUT, StandardCharsets.UTF_8);
+		Path input = pathOption(args, "input", DEFAULT_INPUT);
+		Path output = pathOption(args, "output", DEFAULT_OUTPUT);
+		List<String> rows = Files.readAllLines(input, StandardCharsets.UTF_8);
 		int limit = args.getOptionValues("fill-limit") == null
 			? rows.size() - 1
 			: Integer.parseInt(args.getOptionValues("fill-limit").get(0));
 		String gbisServiceKey = args.getOptionValues("gbis-service-key") == null
 			? ""
 			: args.getOptionValues("gbis-service-key").get(0);
+		boolean skipKakao = args.containsOption("skip-kakao");
 		boolean skipNaver = args.containsOption("skip-naver");
 
-		try (BufferedWriter writer = Files.newBufferedWriter(OUTPUT, StandardCharsets.UTF_8)) {
+		try (BufferedWriter writer = Files.newBufferedWriter(output, StandardCharsets.UTF_8)) {
 				writer.write(String.join(",",
 					"rte_id",
 					"버스번호",
@@ -141,10 +144,12 @@ public class BusCsvFillRunner implements ApplicationRunner {
 				} catch (RuntimeException ex) {
 					System.err.println("GBIS failed " + routeId + " " + region + " " + busNumber + ": " + ex.getMessage());
 				}
-				try {
-					kakaoInfo = busInfoService.fetchKakaoBusRouteInfo(busNumber, region);
-				} catch (RuntimeException ex) {
-					System.err.println("Kakao failed " + routeId + " " + region + " " + busNumber + ": " + ex.getMessage());
+				if (!skipKakao) {
+					try {
+						kakaoInfo = busInfoService.fetchKakaoBusRouteInfo(busNumber, region);
+					} catch (RuntimeException ex) {
+						System.err.println("Kakao failed " + routeId + " " + region + " " + busNumber + ": " + ex.getMessage());
+					}
 				}
 				if (!skipNaver) {
 					try {
@@ -234,6 +239,14 @@ public class BusCsvFillRunner implements ApplicationRunner {
 		} finally {
 			SpringApplication.exit(context, () -> 0);
 		}
+	}
+
+	private Path pathOption(ApplicationArguments args, String name, Path fallback) {
+		List<String> values = args.getOptionValues(name);
+		if (values == null || values.isEmpty() || values.get(0).isBlank()) {
+			return fallback;
+		}
+		return Path.of(values.get(0));
 	}
 
 	private List<String> parseCsvRow(String row) {
