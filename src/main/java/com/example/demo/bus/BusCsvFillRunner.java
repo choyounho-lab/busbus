@@ -23,17 +23,20 @@ public class BusCsvFillRunner implements ApplicationRunner {
 	private final SeleniumBusInfoService busInfoService;
 	private final NaverBusInfoService naverBusInfoService;
 	private final GbisBusInfoService gbisBusInfoService;
+	private final TagoBusInfoService tagoBusInfoService;
 	private final ConfigurableApplicationContext context;
 
 	public BusCsvFillRunner(
 		SeleniumBusInfoService busInfoService,
 		NaverBusInfoService naverBusInfoService,
 		GbisBusInfoService gbisBusInfoService,
+		TagoBusInfoService tagoBusInfoService,
 		ConfigurableApplicationContext context
 	) {
 		this.busInfoService = busInfoService;
 		this.naverBusInfoService = naverBusInfoService;
 		this.gbisBusInfoService = gbisBusInfoService;
+		this.tagoBusInfoService = tagoBusInfoService;
 		this.context = context;
 	}
 
@@ -52,8 +55,15 @@ public class BusCsvFillRunner implements ApplicationRunner {
 		String gbisServiceKey = args.getOptionValues("gbis-service-key") == null
 			? ""
 			: args.getOptionValues("gbis-service-key").get(0);
+		String tagoServiceKey = args.getOptionValues("tago-service-key") == null
+			? ""
+			: args.getOptionValues("tago-service-key").get(0);
+		String tagoCityCodeOption = args.getOptionValues("tago-city-code") == null
+			? ""
+			: args.getOptionValues("tago-city-code").get(0);
 		boolean skipKakao = args.containsOption("skip-kakao");
 		boolean skipNaver = args.containsOption("skip-naver");
+		boolean skipTago = args.containsOption("skip-tago");
 
 		try (BufferedWriter writer = Files.newBufferedWriter(output, StandardCharsets.UTF_8)) {
 				writer.write(String.join(",",
@@ -82,6 +92,26 @@ public class BusCsvFillRunner implements ApplicationRunner {
 					"GBIS_토요일_배차횟수",
 					"GBIS_일요일_배차횟수",
 					"GBIS_휴일_배차횟수",
+					"TAGO_제공처",
+					"TAGO_버스유형",
+					"TAGO_출발지",
+					"TAGO_도착지",
+					"TAGO_평일_첫차",
+					"TAGO_평일_막차",
+					"TAGO_토요일_첫차",
+					"TAGO_토요일_막차",
+					"TAGO_일요일_첫차",
+					"TAGO_일요일_막차",
+					"TAGO_휴일_첫차",
+					"TAGO_휴일_막차",
+					"TAGO_평일_배차간격",
+					"TAGO_토요일_배차간격",
+					"TAGO_일요일_배차간격",
+					"TAGO_휴일_배차간격",
+					"TAGO_평일_배차횟수",
+					"TAGO_토요일_배차횟수",
+					"TAGO_일요일_배차횟수",
+					"TAGO_휴일_배차횟수",
 					"카카오_제공처",
 					"카카오_버스유형",
 					"카카오_출발지",
@@ -126,6 +156,7 @@ public class BusCsvFillRunner implements ApplicationRunner {
 				));
 			writer.newLine();
 
+			List<String> headerColumns = parseCsvRow(rows.get(0));
 			for (int i = 1; i < rows.size() && i <= limit; i++) {
 				List<String> columns = parseCsvRow(rows.get(i));
 				String routeId = columns.get(0);
@@ -133,8 +164,19 @@ public class BusCsvFillRunner implements ApplicationRunner {
 				String regionCode = columns.get(2);
 				String region = columns.get(3);
 				String owner = columns.get(4);
+				String tagoRouteId = firstNonBlank(
+					columnValue(headerColumns, columns, "TAGO_노선ID"),
+					columnValue(headerColumns, columns, "tago_route_id"),
+					routeId
+				);
+				String tagoCityCode = firstNonBlank(
+					columnValue(headerColumns, columns, "TAGO_도시코드"),
+					columnValue(headerColumns, columns, "tago_city_code"),
+					tagoCityCodeOption
+				);
 
 				BusRouteInfo gbisInfo = null;
+				BusRouteInfo tagoInfo = null;
 				BusRouteInfo kakaoInfo = null;
 				BusRouteInfo naverInfo = null;
 				try {
@@ -143,6 +185,15 @@ public class BusCsvFillRunner implements ApplicationRunner {
 					}
 				} catch (RuntimeException ex) {
 					System.err.println("GBIS failed " + routeId + " " + region + " " + busNumber + ": " + ex.getMessage());
+				}
+				if (!skipTago && !tagoServiceKey.isBlank()) {
+					try {
+						tagoInfo = tagoCityCode.isBlank()
+							? tagoBusInfoService.fetchRouteInfoByRouteNo(busNumber, region, tagoServiceKey)
+							: tagoBusInfoService.fetchRouteInfo(tagoRouteId, tagoCityCode, tagoServiceKey);
+					} catch (RuntimeException ex) {
+						System.err.println("TAGO failed " + routeId + " " + region + " " + busNumber + ": " + ex.getMessage());
+					}
 				}
 				if (!skipKakao) {
 					try {
@@ -189,6 +240,26 @@ public class BusCsvFillRunner implements ApplicationRunner {
 						valueOrBlank(gbisInfo == null ? null : gbisInfo.saturdayRuns()),
 						valueOrBlank(gbisInfo == null ? null : gbisInfo.sundayRuns()),
 						valueOrBlank(gbisInfo == null ? null : gbisInfo.holidayRuns()),
+						tagoInfo == null ? "" : "TAGO",
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.busType()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.origin()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.destination()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.firstBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.lastBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.saturdayFirstBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.saturdayLastBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.sundayFirstBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.sundayLastBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.holidayFirstBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.holidayLastBus()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.headway()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.saturdayHeadway()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.sundayHeadway()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.holidayHeadway()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.dailyRuns()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.saturdayRuns()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.sundayRuns()),
+						valueOrBlank(tagoInfo == null ? null : tagoInfo.holidayRuns()),
 						kakaoInfo == null ? "" : "카카오",
 						valueOrBlank(kakaoInfo == null ? null : kakaoInfo.busType()),
 						valueOrBlank(kakaoInfo == null ? null : kakaoInfo.origin()),
@@ -229,7 +300,7 @@ public class BusCsvFillRunner implements ApplicationRunner {
 						valueOrBlank(naverInfo == null ? null : naverInfo.saturdayRuns()),
 						valueOrBlank(naverInfo == null ? null : naverInfo.sundayRuns()),
 						valueOrBlank(naverInfo == null ? null : naverInfo.holidayRuns()),
-						sourceList(gbisInfo, kakaoInfo, naverInfo)
+						sourceList(gbisInfo, tagoInfo, kakaoInfo, naverInfo)
 					)));
 				writer.newLine();
 				writer.flush();
@@ -258,10 +329,13 @@ public class BusCsvFillRunner implements ApplicationRunner {
 		return columns;
 	}
 
-	private String sourceList(BusRouteInfo gbisInfo, BusRouteInfo kakaoInfo, BusRouteInfo naverInfo) {
+	private String sourceList(BusRouteInfo gbisInfo, BusRouteInfo tagoInfo, BusRouteInfo kakaoInfo, BusRouteInfo naverInfo) {
 		List<String> sources = new ArrayList<>();
 		if (gbisInfo != null) {
 			sources.add("GBIS");
+		}
+		if (tagoInfo != null) {
+			sources.add("TAGO");
 		}
 		if (kakaoInfo != null) {
 			sources.add("카카오");
@@ -362,5 +436,22 @@ public class BusCsvFillRunner implements ApplicationRunner {
 
 	private String valueOrBlank(String value) {
 		return value == null ? "" : value;
+	}
+
+	private String columnValue(List<String> headerColumns, List<String> columns, String name) {
+		int index = headerColumns.indexOf(name);
+		if (index < 0 || index >= columns.size()) {
+			return "";
+		}
+		return columns.get(index);
+	}
+
+	private String firstNonBlank(String... values) {
+		for (String value : values) {
+			if (value != null && !value.isBlank()) {
+				return value;
+			}
+		}
+		return "";
 	}
 }
